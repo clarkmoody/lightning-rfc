@@ -83,6 +83,7 @@ desire to set up a new channel.
 
 1. type: 32 (`open_channel`)
 2. data:
+   * [32:chain-hash]
    * [32:temporary-channel-id]
    * [8:funding-satoshis]
    * [8:push-msat]
@@ -100,6 +101,12 @@ desire to set up a new channel.
    * [33:first-per-commitment-point]
 
 
+The chain-hash value denotes the exact blockchain the opened channel will
+reside within. This is usually the genesis hash of the respective blockchain.
+The existence of the chain-hash allows nodes to open channel
+across many distinct blockchains as well as have channels within multiple
+blockchains opened to the same peer (if they support the target chains).
+
 The `temporary-channel-id` is used to identify this channel until the funding transaction is established. `funding-satoshis` is the amount the sender is putting into the channel.  `dust-limit-satoshis` is the threshold below which output should be generated for this node's commitment or HTLC transaction; ie. HTLCs below this amount plus HTLC transaction fees are not enforceable on-chain.  This reflects the reality that tiny outputs are not considered standard transactions and will not propagate through the Bitcoin network.
 
 `max-htlc-value-in-inflight-msat` is a cap on total value of outstanding HTLCs, which allows a node to limit its exposure to HTLCs; similarly `max-accepted-htlcs` limits the number of outstanding HTLCs the other node can offer. `channel-reserve-satoshis` is the minimum amount that the other node is to keep as a direct payment. `htlc-minimum-msat` indicates the smallest value HTLC this node will accept.
@@ -113,6 +120,10 @@ FIXME: Describe Dangerous feature bit for larger channel amounts.
 
 #### Requirements
 
+A sending node MUST ensure that the chain-hash value identifies the chain they
+they wish to open the channel within. For the Bitcoin blockchain, the
+chain-hash value MUST be (encoded in hex):
+`000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f`.
 
 A sending node MUST ensure `temporary-channel-id` is unique from any other
 channel id with the same peer.  The sender MUST set `funding-satoshis`
@@ -197,6 +208,9 @@ acceptance of the new channel.
 
 #### Requirements
 
+
+The receiving MUST reject the channel if the `chain-hash` value within the
+`open_channel` message is set to a hash of a chain unknown to the receiver.
 
 The `temporary-channel-id` MUST be the same as the `temporary-channel-id` in the `open_channel` message.  The sender SHOULD set `minimum-depth` to a number of blocks it considers reasonable to avoid double-spending of the funding transaction.
 
@@ -487,6 +501,9 @@ so we should fulfill the incoming HTLC as soon as we can to reduce latency.
 ### Risks With HTLC Timeouts
 
 
+Once an HTLC has timed out where it could either be fulfilled or timed-out;
+care must be taken around this transition both for offered and received HTLCs.
+
 As a result of forwarding an HTLC from node A to node C, B will end up having an incoming
 HTLC from A and an outgoing HTLC to C. B will make sure that the incoming HTLC has a greater 
 timeout than the outgoing HTLC, so that B can get refunded from C sooner than it has to refund
@@ -521,12 +538,21 @@ Thus the effective timeout of the HTLC is the `cltv-expiry`, plus some
 additional delay for the transaction which redeems the HTLC output to
 be irreversibly committed to the blockchain.
 
+The fulfillment risk is similar: if a node C fulfills an HTLC after
+its timeout, B might broadcast the commitment transaction and
+immediately broadcast the HTLC timeout transaction.  In this scenario,
+B would gain knowledge of the preimage without paying C.
 
-Thus a node MUST estimate the deadline for successful redemption for
-each HTLC it offers.  A node MUST NOT offer a HTLC after this
-deadline, and MUST fail the channel if an HTLC which it offered is in
-either node's current commitment transaction past this deadline.
+#### Requirements
 
+A node MUST estimate the deadline for successful redemption for each
+HTLC.  A node MUST NOT offer a HTLC after this deadline, and
+MUST fail the channel if an HTLC which it offered is in either node's
+current commitment transaction past this deadline.
+
+A node MUST NOT fulfill an HTLC after this deadline, and MUST fail the
+connection if a HTLC it has fulfilled is in either node's current
+commitment transaction past this deadline.
 
 ### Adding an HTLC: `update_add_htlc`
 
